@@ -316,6 +316,15 @@ class PlotWindow(QMainWindow):
 
         plot_widget = cast(PlotWidget, self._central_tab.currentWidget())
 
+        required_ensemble_attr = getattr(
+            plot_widget._plotter, "required_ensemble_attr", None
+        )
+        # Add has_function_results to filter out perturbation batches.
+        # Everest uses the Ensemble-plot for gen_data and summary data-types
+        if required_ensemble_attr is None and self.is_everest:
+            required_ensemble_attr = "has_function_results"
+        self._ensemble_selection_widget.filter_by_attribute(required_ensemble_attr)
+
         # For Breakthrough responses, we want to plot summary_key timeseries, but use
         # derived breakthrough responses for misfits.
         selected_tab = plot_widget.name

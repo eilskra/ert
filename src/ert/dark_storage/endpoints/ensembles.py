@@ -31,6 +31,8 @@ def get_ensemble(
             "name": ensemble.name,
             "experiment_name": ensemble.experiment.name,
             "started_at": ensemble.started_at,
+            "has_function_results": ensemble.has_function_results,
+            "has_gradient_results": ensemble.has_gradient_results,
         },
         size=ensemble.ensemble_size,
         realization_storage_states=Counter(

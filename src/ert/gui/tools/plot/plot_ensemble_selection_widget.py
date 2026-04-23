@@ -63,6 +63,9 @@ class EnsembleSelectionWidget(QWidget):
     def get_selected_ensembles_color_indexes(self) -> list[int]:
         return self._selected_ensembles.get_checked_color_indexes()
 
+    def filter_by_attribute(self, attr: str | None) -> None:
+        self._selected_ensembles.filter_by_attribute(attr)
+
 
 class EnsembleSelectListWidgetItemDataRole(IntEnum):
     ENSEMBLE = Qt.ItemDataRole.UserRole
@@ -137,6 +140,44 @@ class EnsembleSelectListWidget(QListWidget):
                     yield item.data(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX)
 
         return list(_iter())
+
+    def filter_by_attribute(self, attr: str | None) -> None:
+        """Hide ensembles that lack the given attribute.
+
+        Hidden ensembles are unchecked so that downstream data fetches do not
+        include them. If filtering would leave no checked ensemble, the first
+        visible item is checked instead.
+        """
+        visible_items: list[QListWidgetItem] = []
+        for index in range(self._ensemble_count):
+            item = self.item(index)
+            assert item is not None
+            ensemble = item.data(EnsembleSelectListWidgetItemDataRole.ENSEMBLE)
+            visible = attr is None or getattr(ensemble, attr, True)
+            item.setHidden(not visible)
+            if visible:
+                visible_items.append(item)
+            elif item.data(Qt.ItemDataRole.CheckStateRole):
+                self.release_color(
+                    item.data(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX)
+                )
+                item.setData(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX, None)
+                item.setData(Qt.ItemDataRole.CheckStateRole, False)
+                self.ensembleSelectionListChanged.emit()
+
+        any_checked = any(
+            it.data(Qt.ItemDataRole.CheckStateRole) for it in visible_items
+        )
+        if not any_checked and visible_items:
+            first = visible_items[0]
+            first.setData(
+                EnsembleSelectListWidgetItemDataRole.COLOR_INDEX,
+                self.assign_available_color(
+                    first.data(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX)
+                ),
+            )
+            first.setData(Qt.ItemDataRole.CheckStateRole, True)
+            self.ensembleSelectionListChanged.emit()
 
     @override
     def mouseMoveEvent(self, e: QMouseEvent | None) -> None:

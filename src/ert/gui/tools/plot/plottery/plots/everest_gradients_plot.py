@@ -20,6 +20,7 @@ class EverestGradientsPlot:
     def __init__(self) -> None:
         self.dimensionality = 2
         self.requires_observations = False
+        self.required_ensemble_attr: str | None = "has_gradient_results"
         self.selected_controls: list[str] = []
 
     def set_selected_controls(self, controls: list[str]) -> None:

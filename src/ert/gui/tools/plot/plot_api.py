@@ -39,6 +39,8 @@ class EnsembleObject:
     hidden: bool
     experiment_name: str
     started_at: str
+    has_function_results: bool = False
+    has_gradient_results: bool = False
 
 
 class PlotApiKeyDefinition(NamedTuple):
@@ -119,6 +121,12 @@ class PlotApi:
                                 hidden=ensemble_name.startswith(".")
                                 or ensemble_undefined,
                                 started_at=ensemble_started_at,
+                                has_function_results=response_json["userdata"].get(
+                                    "has_function_results", False
+                                ),
+                                has_gradient_results=response_json["userdata"].get(
+                                    "has_gradient_results", False
+                                ),
                             )
                         )
             except IndexError as exc:

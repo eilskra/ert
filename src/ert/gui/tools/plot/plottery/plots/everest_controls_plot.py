@@ -32,6 +32,7 @@ class EverestControlsPlot:
     def __init__(self) -> None:
         self.dimensionality = 2
         self.requires_observations = False
+        self.required_ensemble_attr: str | None = "has_function_results"
         self.selected_controls: list[str] = []
         self.LEGEND_THRESHOLD = 5
 
