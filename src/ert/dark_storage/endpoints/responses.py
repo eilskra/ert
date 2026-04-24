@@ -170,7 +170,8 @@ def data_for_response(
             return violation.drop("batch_id").to_numpy().max().item()
 
         CONSTRAINT_TOL = 1e-6
-        accepted_batches = []
+        accepted_batches: list[tuple[Ensemble, float]] = []
+        rejected_batches_with_value_and_reason: list[tuple[Ensemble, float, str]] = []
         max_total_objective = np.inf
         for current_ensemble in ensemble.experiment.ensembles_with_function_results:
             if current_ensemble.batch_objectives is None:
@@ -200,34 +201,88 @@ def data_for_response(
                 < CONSTRAINT_TOL
                 and total_objective < max_total_objective
             ):
-                accepted_batches.append(current_ensemble)
+                accepted_batches.append(
+                    (current_ensemble, (total_objective - max_total_objective) * -1)
+                )
                 max_total_objective = total_objective
+            elif total_objective >= max_total_objective:
+                difference = total_objective - max_total_objective
+                rejected_batches_with_value_and_reason.append(
+                    (current_ensemble, difference, "non-improvement")
+                )
+
+            else:
+                violations = {
+                    "bound": bound_constraint_violation,
+                    "input": input_constraint_violation,
+                    "output": output_constraint_violation,
+                }
+                constraint_violation_type = max(violations, key=lambda k: violations[k])
+                constraint_violation_value = violations[constraint_violation_type]
+                rejected_batches_with_value_and_reason.append(
+                    (
+                        current_ensemble,
+                        constraint_violation_value,
+                        f"{constraint_violation_type} constraint violation",
+                    )
+                )
 
         objective_value_df = ensemble.batch_objectives.clone().select(
             ["batch_id", "total_objective_value"]
         )
 
-        return (
-            objective_value_df.join(
-                pl.DataFrame(
-                    {
-                        "batch_id": [batch.iteration for batch in accepted_batches],
-                        "is_improvement": [True] * len(accepted_batches),
-                    }
-                ),
-                on="batch_id",
-                how="left",
-            )
-            .with_columns(pl.col("total_objective_value").neg())
-            .with_columns(pl.col("is_improvement").fill_null(False))
-            .to_pandas()
-            .astype(
+        improvement_df = objective_value_df.join(
+            pl.DataFrame(
                 {
-                    "batch_id": int,
-                    "total_objective_value": float,
-                    "is_improvement": bool,
+                    "batch_id": [batch.iteration for batch, _ in accepted_batches],
+                    "is_improvement": [True] * len(accepted_batches),
+                    "improvement_value": [value for _, value in accepted_batches],
+                }
+            ),
+            on="batch_id",
+            how="left",
+        ).with_columns(
+            pl.col("total_objective_value").neg(),
+            pl.col("is_improvement").fill_null(False),
+        )
+
+        if rejected_batches_with_value_and_reason:
+            rejected_df = pl.DataFrame(
+                {
+                    "batch_id": [
+                        batch.iteration
+                        for batch, _, _ in rejected_batches_with_value_and_reason
+                    ],
+                    "constraint_violation_value": [
+                        value for _, value, _ in rejected_batches_with_value_and_reason
+                    ],
+                    "constraint_violation_type": [
+                        reason
+                        for _, _, reason in rejected_batches_with_value_and_reason
+                    ],
                 }
             )
+            return (
+                improvement_df.join(rejected_df, on="batch_id", how="left")
+                .to_pandas()
+                .astype(
+                    {
+                        "batch_id": int,
+                        "total_objective_value": float,
+                        "is_improvement": bool,
+                        "improvement_value": float,
+                        "constraint_violation_value": float,
+                        "constraint_violation_type": str,
+                    }
+                )
+            )
+        return improvement_df.to_pandas().astype(
+            {
+                "batch_id": int,
+                "total_objective_value": float,
+                "is_improvement": bool,
+                "improvement_value": float,
+            }
         )
 
     response_key, response_type = _extract_response_type_and_key(
