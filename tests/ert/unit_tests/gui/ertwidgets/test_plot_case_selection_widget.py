@@ -25,7 +25,7 @@ def test_ensemble_selection_widget_max_min_selection(qtbot: QtBot):
     list_widget = get_child(widget, EnsembleSelectListWidget, "ensemble_selector")
 
     assert (
-        len(widget.get_selected_ensembles()) == list_widget.get_minimum_selected()
+        len(widget.get_selected_ensembles()) == list_widget.get_minimum_ensemble_limit()
     )  # initially one selected
 
     qtbot.mouseClick(
@@ -35,25 +35,60 @@ def test_ensemble_selection_widget_max_min_selection(qtbot: QtBot):
     )  # deselect the only item selected
 
     assert (
-        len(widget.get_selected_ensembles()) == list_widget.get_minimum_selected()
+        len(widget.get_selected_ensembles()) == list_widget.get_minimum_ensemble_limit()
     )  # still one selected
 
-    for index in range(list_widget.count()):  # select 'all'
-        it = list_widget.item(index)
-        qtbot.mouseClick(
-            list_widget.viewport(),
-            Qt.MouseButton.LeftButton,
-            pos=list_widget.visualItemRect(it).center(),
-        )
+    def iterate_and_click_all_items(count):
+        for index in count:
+            it = list_widget.item(index)
+            qtbot.mouseClick(
+                list_widget.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=list_widget.visualItemRect(it).center(),
+            )
 
-    assert len(widget.get_selected_ensembles()) == list_widget.get_maximum_selected()
+    iterate_and_click_all_items(range(list_widget.count()))  # select 'all'
+    assert (
+        len(widget.get_selected_ensembles()) == list_widget.get_maximum_ensemble_limit()
+    )
 
-    for index in reversed(range(list_widget.count())):  # deselect 'all'
-        it = list_widget.item(index)
-        qtbot.mouseClick(
-            list_widget.viewport(),
-            Qt.MouseButton.LeftButton,
-            pos=list_widget.visualItemRect(it).center(),
-        )
+    iterate_and_click_all_items(reversed(range(list_widget.count())))  # deselect 'all'
+    assert (
+        len(widget.get_selected_ensembles()) == list_widget.get_minimum_ensemble_limit()
+    )
 
-    assert len(widget.get_selected_ensembles()) == list_widget.get_minimum_selected()
+    # Increase upper limit and verify that we can select more ensembles
+    list_widget.set_maximum_ensemble_limit(10)
+    iterate_and_click_all_items(range(list_widget.count()))  # select 'all'
+    assert (
+        len(widget.get_selected_ensembles()) == list_widget.get_maximum_ensemble_limit()
+    )
+
+    # Increase lower limit and verify that we cannot deselect below the new limit
+    list_widget.set_minimum_ensemble_limit(5)
+    iterate_and_click_all_items(reversed(range(list_widget.count())))  # deselect 'all'
+    assert (
+        len(widget.get_selected_ensembles()) == list_widget.get_minimum_ensemble_limit()
+    )
+
+    # Set lower lim to 0, then clear selection
+    list_widget.set_minimum_ensemble_limit(0)
+    list_widget.clear_ensemble_selection()
+    assert len(widget.get_selected_ensembles()) == 0
+
+    list_widget.select_all_ensembles()
+    assert (
+        len(widget.get_selected_ensembles()) == list_widget.get_maximum_ensemble_limit()
+    )
+
+    # Check that resetting to default works as expected
+    list_widget.reset_maximum_ensemble_limit_to_default()
+    list_widget.reset_minimum_ensemble_limit_to_default()
+    iterate_and_click_all_items(reversed(range(list_widget.count())))  # deselect 'all'
+    assert (
+        len(widget.get_selected_ensembles()) == list_widget.get_minimum_ensemble_limit()
+    )
+    iterate_and_click_all_items(range(list_widget.count()))  # select 'all'
+    assert (
+        len(widget.get_selected_ensembles()) == list_widget.get_maximum_ensemble_limit()
+    )

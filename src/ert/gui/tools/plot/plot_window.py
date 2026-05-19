@@ -649,24 +649,26 @@ class PlotWindow(QMainWindow):
             and key_def.response.type in {"summary", "gen_data"}
             and key_def.key != self._prev_key
         ):
-            self._ensemble_selection_widget.reset_maximum_selected()
-            self._ensemble_selection_widget.set_minimum_selected(0)
+            self._ensemble_selection_widget.reset_maximum_ensemble_limit_to_default()
+            self._ensemble_selection_widget.set_minimum_ensemble_limit(0)
             self._ensemble_selection_widget.blockSignals(True)
-            self._ensemble_selection_widget.clear_selection()
+            self._ensemble_selection_widget.clear_ensemble_selection()
             self._ensemble_selection_widget.blockSignals(False)
-            max_selected = self._ensemble_selection_widget.get_maximum_selected()
+            max_selected = self._ensemble_selection_widget.get_maximum_ensemble_limit()
             self._ensemble_group.setTitle(f"Select up to {max_selected} batches")
         else:
-            if is_everest_specific_widget:
-                self._ensemble_selection_widget.set_maximum_selected(
+            if is_everest_specific_widget and key_def.key != self._prev_key:
+                self._ensemble_selection_widget.set_maximum_ensemble_limit(
                     EVEREST_UPPER_BATCH_LIMIT
                 )
-                self._ensemble_selection_widget.reset_minimum_selected()
-                self._ensemble_selection_widget.select_all()
+                self._ensemble_selection_widget.reset_minimum_ensemble_limit_to_default()
+                self._ensemble_selection_widget.blockSignals(True)
+                self._ensemble_selection_widget.select_all_ensembles()
+                self._ensemble_selection_widget.blockSignals(False)
             else:
-                self._ensemble_selection_widget.reset_maximum_and_minimum_selected()
+                self._ensemble_selection_widget.reset_maximum_and_minimum_ensemble_limits_to_default()
 
-            max_selected = self._ensemble_selection_widget.get_maximum_selected()
+            max_selected = self._ensemble_selection_widget.get_maximum_ensemble_limit()
             str_num_of_ens = f" up to {max_selected}" if self.is_everest else ""
             self._ensemble_group.setTitle(
                 f"Select{str_num_of_ens} batches"
