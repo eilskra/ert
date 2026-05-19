@@ -25,7 +25,7 @@ def test_ensemble_selection_widget_max_min_selection(qtbot: QtBot):
     list_widget = get_child(widget, EnsembleSelectListWidget, "ensemble_selector")
 
     assert (
-        len(widget.get_selected_ensembles()) == list_widget.MINIMUM_SELECTED
+        len(widget.get_selected_ensembles()) == list_widget.get_minimum_selected()
     )  # initially one selected
 
     qtbot.mouseClick(
@@ -35,7 +35,7 @@ def test_ensemble_selection_widget_max_min_selection(qtbot: QtBot):
     )  # deselect the only item selected
 
     assert (
-        len(widget.get_selected_ensembles()) == list_widget.MINIMUM_SELECTED
+        len(widget.get_selected_ensembles()) == list_widget.get_minimum_selected()
     )  # still one selected
 
     for index in range(list_widget.count()):  # select 'all'
@@ -46,7 +46,7 @@ def test_ensemble_selection_widget_max_min_selection(qtbot: QtBot):
             pos=list_widget.visualItemRect(it).center(),
         )
 
-    assert len(widget.get_selected_ensembles()) == list_widget.MAXIMUM_SELECTED
+    assert len(widget.get_selected_ensembles()) == list_widget.get_maximum_selected()
 
     for index in reversed(range(list_widget.count())):  # deselect 'all'
         it = list_widget.item(index)
@@ -56,4 +56,4 @@ def test_ensemble_selection_widget_max_min_selection(qtbot: QtBot):
             pos=list_widget.visualItemRect(it).center(),
         )
 
-    assert len(widget.get_selected_ensembles()) == list_widget.MINIMUM_SELECTED
+    assert len(widget.get_selected_ensembles()) == list_widget.get_minimum_selected()

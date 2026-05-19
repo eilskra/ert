@@ -64,6 +64,31 @@ class EnsembleSelectionWidget(QWidget):
             require_func_eval, require_gradient
         )
 
+    def reset_maximum_selected(self) -> None:
+        self._selected_ensembles.reset_maximum()
+
+    def reset_minimum_selected(self) -> None:
+        self._selected_ensembles.reset_minimum()
+
+    def reset_maximum_and_minimum_selected(self) -> None:
+        self.reset_maximum_selected()
+        self.reset_minimum_selected()
+
+    def clear_selection(self) -> None:
+        self._selected_ensembles.clear_selection()
+
+    def set_maximum_selected(self, value: int) -> None:
+        self._selected_ensembles.set_maximum_selected(value)
+
+    def get_maximum_selected(self) -> int:
+        return self._selected_ensembles.get_maximum_selected()
+
+    def set_minimum_selected(self, value: int) -> None:
+        self._selected_ensembles.set_minimum_selected(value)
+
+    def get_minimum_selected(self) -> int:
+        return self._selected_ensembles.get_minimum_selected()
+
     def get_selected_ensembles(self) -> list[EnsembleObject]:
         return self._selected_ensembles.get_checked_ensembles()
 
@@ -78,8 +103,8 @@ class EnsembleSelectListWidgetItemDataRole(IntEnum):
 
 class EnsembleSelectListWidget(QListWidget):
     ensembleSelectionListChanged = Signal()
-    MAXIMUM_SELECTED = 5
-    MINIMUM_SELECTED = 1
+    DEFAULT_MINIMUM_SELECTED = 1
+    DEFAULT_MAXIMUM_SELECTED = 5
 
     def __init__(
         self,
@@ -87,8 +112,10 @@ class EnsembleSelectListWidget(QListWidget):
         number_of_plot_colors: int,
     ) -> None:
         super().__init__()
+        self._maximum_selected = self.DEFAULT_MAXIMUM_SELECTED
+        self._minimum_selected = self.DEFAULT_MINIMUM_SELECTED
         self.available_colors = deque(
-            range(max(number_of_plot_colors, self.MAXIMUM_SELECTED))
+            range(max(number_of_plot_colors, self._maximum_selected))
         )
         self._ensemble_count = 0
         self.setObjectName("ensemble_selector")
@@ -96,7 +123,7 @@ class EnsembleSelectListWidget(QListWidget):
             ensembles, key=lambda ens: ens.started_at, reverse=True
         )
         is_everest = is_everest_application()
-        cutoff = self.MAXIMUM_SELECTED if is_everest else self.MINIMUM_SELECTED
+        cutoff = self._maximum_selected if is_everest else self._minimum_selected
         for i, ensemble in enumerate(sorted_ensembles):
             item_text = (
                 f"{ensemble.experiment_name} : {ensemble.name}"
@@ -114,7 +141,7 @@ class EnsembleSelectListWidget(QListWidget):
             self._ensemble_count += 1
             it.setToolTip(
                 f"{item_text}\n"
-                f"Toggle up to {self.MAXIMUM_SELECTED} plots or reorder by"
+                f"Toggle up to {self._maximum_selected} plots or reorder by"
                 "drag & drop\n"
                 f"Order determines draw order and color"
             )
@@ -144,6 +171,23 @@ class EnsembleSelectListWidget(QListWidget):
                 self.release_color(
                     item.data(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX)
                 )
+                item.setData(Qt.ItemDataRole.CheckStateRole, False)
+
+    def reset_maximum(self) -> None:
+        self.set_maximum_selected(self.DEFAULT_MAXIMUM_SELECTED)
+
+    def reset_minimum(self) -> None:
+        self.set_minimum_selected(self.DEFAULT_MINIMUM_SELECTED)
+
+    def clear_selection(self) -> None:
+        for index in range(self._ensemble_count):
+            if (item := self.item(index)) is None:
+                continue
+            if item.data(Qt.ItemDataRole.CheckStateRole):
+                self.release_color(
+                    item.data(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX)
+                )
+                item.setData(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX, None)
                 item.setData(Qt.ItemDataRole.CheckStateRole, False)
 
     def get_checked_ensembles(self) -> list[EnsembleObject]:
@@ -187,12 +231,12 @@ class EnsembleSelectListWidget(QListWidget):
         count = len(self.get_checked_ensembles())
         selected = item.data(Qt.ItemDataRole.CheckStateRole)
 
-        if selected and count > self.MINIMUM_SELECTED:
+        if selected and count > self._minimum_selected:
             self.release_color(
                 item.data(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX)
             )
             item.setData(Qt.ItemDataRole.CheckStateRole, False)
-        elif not selected and count < self.MAXIMUM_SELECTED:
+        elif not selected and count < self._maximum_selected:
             item.setData(
                 EnsembleSelectListWidgetItemDataRole.COLOR_INDEX,
                 self.assign_available_color(
@@ -202,6 +246,25 @@ class EnsembleSelectListWidget(QListWidget):
             item.setData(Qt.ItemDataRole.CheckStateRole, True)
 
         self.ensembleSelectionListChanged.emit()
+
+    def set_maximum_selected(self, value: int) -> None:
+        if value > self._maximum_selected:
+            # to prevent popleft() error for everest
+            # when selecting more batches than len(palette)
+            existing = set(self.available_colors)
+            for i in range(self._maximum_selected, value):
+                if i not in existing:
+                    self.available_colors.append(i)
+        self._maximum_selected = value
+
+    def get_maximum_selected(self) -> int:
+        return self._maximum_selected
+
+    def set_minimum_selected(self, value: int) -> None:
+        self._minimum_selected = value
+
+    def get_minimum_selected(self) -> int:
+        return self._minimum_selected
 
     def assign_available_color(self, current_color_index: int | None) -> int:
         if (
