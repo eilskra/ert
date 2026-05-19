@@ -95,6 +95,9 @@ class EnsembleSelectionWidget(QWidget):
     def get_selected_ensembles_color_indexes(self) -> list[int]:
         return self._selected_ensembles.get_checked_color_indexes()
 
+    def select_all(self) -> None:
+        self._selected_ensembles.select_all()
+
 
 class EnsembleSelectListWidgetItemDataRole(IntEnum):
     ENSEMBLE = Qt.ItemDataRole.UserRole
@@ -189,6 +192,19 @@ class EnsembleSelectListWidget(QListWidget):
                 )
                 item.setData(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX, None)
                 item.setData(Qt.ItemDataRole.CheckStateRole, False)
+
+    def select_all(self) -> None:
+        for index in range(self._ensemble_count):
+            if (item := self.item(index)) is None:
+                continue
+            if not item.data(Qt.ItemDataRole.CheckStateRole) and not item.isHidden():
+                item.setData(
+                    EnsembleSelectListWidgetItemDataRole.COLOR_INDEX,
+                    self.assign_available_color(
+                        item.data(EnsembleSelectListWidgetItemDataRole.COLOR_INDEX)
+                    ),
+                )
+                item.setData(Qt.ItemDataRole.CheckStateRole, True)
 
     def get_checked_ensembles(self) -> list[EnsembleObject]:
         def _iter() -> Iterator[EnsembleObject]:

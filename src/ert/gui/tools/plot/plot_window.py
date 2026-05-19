@@ -662,6 +662,7 @@ class PlotWindow(QMainWindow):
                     EVEREST_UPPER_BATCH_LIMIT
                 )
                 self._ensemble_selection_widget.reset_minimum_selected()
+                self._ensemble_selection_widget.select_all()
             else:
                 self._ensemble_selection_widget.reset_maximum_and_minimum_selected()
 
