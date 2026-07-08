@@ -1,5 +1,6 @@
 from unittest.mock import ANY, Mock
 
+import numpy as np
 import pandas as pd
 import pytest
 from matplotlib.figure import Figure
@@ -113,4 +114,87 @@ def test_histogram_plot_for_constant_distribution(monkeypatch):
         use_log_scale=ANY,
         minimum=min_value,
         maximum=max_value,
+    )
+
+
+def _first_subplot_bars(figure: Figure) -> list[tuple[float, float, float]]:
+    axes = figure.axes[0]
+    return [
+        (patch.get_x(), patch.get_width(), patch.get_height()) for patch in axes.patches
+    ]
+
+
+def _subplot_counts(figure: Figure) -> list[list[float]]:
+    return [[patch.get_height() for patch in axes.patches] for axes in figure.axes]
+
+
+def _plot_context_for(ensembles: list[EnsembleObject]) -> PlotContext:
+    context = Mock(spec=PlotContext)
+    context.ensembles.return_value = ensembles
+    context.ensembles_color_indexes.return_value = list(range(1, len(ensembles) + 1))
+    context.log_scale = False
+    context.plotConfig.return_value = PlotConfig(title="Histogram")
+    return context
+
+
+def test_that_ensemble_binning_is_independent_of_other_selected_ensembles():
+    # Regression test for #13958: the binning of an ensemble's histogram must
+    # depend only on that ensemble's own data, not on other selected ensembles.
+    small_ensemble = EnsembleObject(
+        "small",
+        "small-id",
+        False,
+        "experiment_1",
+        started_at="2012-12-10T00:00:00",
+    )
+    large_ensemble = EnsembleObject(
+        "large",
+        "large-id",
+        False,
+        "experiment_1",
+        started_at="2012-12-11T00:00:00",
+    )
+
+    rng = np.random.default_rng(1234)
+    small_data = pd.DataFrame(rng.normal(size=5))
+    large_data = pd.DataFrame(rng.normal(size=5000))
+
+    figure_alone = Figure()
+    HistogramPlot().plot(
+        figure_alone,
+        _plot_context_for([small_ensemble]),
+        {small_ensemble: small_data},
+        pd.DataFrame(),
+        {},
+        {},
+    )
+
+    figure_with_large = Figure()
+    HistogramPlot().plot(
+        figure_with_large,
+        _plot_context_for([small_ensemble, large_ensemble]),
+        {small_ensemble: small_data, large_ensemble: large_data},
+        pd.DataFrame(),
+        {},
+        {},
+    )
+
+    bars_alone_height = [patch.get_height() for patch in figure_alone.axes[0].patches]
+    bars_with_large_height = [
+        patch.get_height() for patch in figure_with_large.axes[0].patches
+    ]
+
+    assert bars_alone_height == pytest.approx(bars_with_large_height), (
+        "small ensemble's bin heights changed when a larger ensemble was selected"
+    )
+
+    bars_alone = _first_subplot_bars(figure_alone)
+    bars_with_large = _first_subplot_bars(figure_with_large)
+
+    assert len(bars_alone) == len(bars_with_large), (
+        "small ensemble's bin count changed when a larger ensemble was selected"
+    )
+    assert bars_alone == pytest.approx(bars_with_large)
+    assert _first_subplot_bars(figure_alone) == pytest.approx(
+        _first_subplot_bars(figure_with_large)
     )
