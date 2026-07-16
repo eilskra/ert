@@ -4,7 +4,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cache, cached_property
 from itertools import combinations as combi
 from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.parse import quote
@@ -60,6 +60,7 @@ class PlotApi:
         self.ens_path: Path = ens_path
         self._all_ensembles: list[EnsembleObject] | None = None
         self._timeout = 120
+        self._response_cache: dict[tuple[str, str, str | None], pd.DataFrame] = {}
 
     @property
     def api_version(self) -> str:
@@ -255,6 +256,28 @@ class PlotApi:
         response_key: str,
         filter_on: dict[str, Any] | None = None,
     ) -> pd.DataFrame:
+        cache_key = (
+            ensemble_id,
+            response_key,
+            json.dumps(filter_on, sort_keys=True) if filter_on is not None else None,
+        )
+        cached = self._response_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        result = self._fetch_response(ensemble_id, response_key, filter_on)
+        # Responses are written while a run is in progress, so an empty result may
+        # be filled in later. Only cache populated frames to avoid stale reads.
+        if not result.empty:
+            self._response_cache[cache_key] = result
+        return result
+
+    def _fetch_response(
+        self,
+        ensemble_id: str,
+        response_key: str,
+        filter_on: dict[str, Any] | None,
+    ) -> pd.DataFrame:
         key_def = next(
             (k for k in self.responses_api_key_defs if k.key == response_key), None
         )
@@ -341,6 +364,7 @@ class PlotApi:
             except ValueError:
                 return df
 
+    @cache  # noqa: B019
     def data_for_gradient(self, ensemble_id: str, key: str) -> pd.DataFrame:
         if "@" in key:
             key = key.split("@", maxsplit=1)[0]
@@ -388,6 +412,7 @@ class PlotApi:
             return pd.DataFrame()
         return pd.concat(frames, ignore_index=True)
 
+    @cache  # noqa: B019
     def data_for_parameter(self, ensemble_id: str, parameter_key: str) -> pd.DataFrame:
         with create_ertserver_client(self.ens_path) as client:
             http_response = client.get(
@@ -563,6 +588,7 @@ class PlotApi:
                 return df.drop(columns=duplicate_cols)
         return pd.DataFrame()
 
+    @cache  # noqa: B019
     def std_dev_for_parameter(
         self, key: str, ensemble_id: str, z: int
     ) -> npt.NDArray[np.float32]:

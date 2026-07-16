@@ -135,6 +135,26 @@ def test_can_load_data_and_observations(api):
         assert not data.empty
 
 
+def test_that_data_for_response_is_fetched_once_for_repeated_calls(api, monkeypatch):
+    ensemble = next(x for x in api.get_all_ensembles() if x.name == "default_0")
+
+    fetch_calls = []
+    original_fetch = api._fetch_response
+
+    def counting_fetch(*args, **kwargs):
+        fetch_calls.append(args)
+        return original_fetch(*args, **kwargs)
+
+    monkeypatch.setattr(api, "_fetch_response", counting_fetch)
+
+    first = api.data_for_response(ensemble.id, "FOPR")
+    second = api.data_for_response(ensemble.id, "FOPR")
+
+    assert not first.empty
+    assert len(fetch_calls) == 1
+    assert_frame_equal(first, second)
+
+
 def test_all_data_type_keys(api):
     keys = [e.key for e in (api.parameters_api_key_defs + api.responses_api_key_defs)]
     assert sorted(keys) == sorted(

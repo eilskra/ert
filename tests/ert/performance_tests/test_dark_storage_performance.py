@@ -4,6 +4,7 @@ import gc
 import io
 import json
 import os
+import timeit
 from collections.abc import Awaitable
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -434,3 +435,45 @@ def test_plotter_on_all_snake_oil_responses_memory(api_and_snake_oil_storage):
     # thresholds are set to about 1.5x local memory used
     assert total_memory_mb < 5000
     assert peak_memory_mb < 1500
+
+
+def _first_populated_response(api: PlotApi) -> tuple[str, str, dict | None]:
+    ensembles = api.get_all_ensembles()
+    for key_info in api.responses_api_key_defs:
+        for ensemble in ensembles:
+            df = api.data_for_response(ensemble.id, key_info.key, key_info.filter_on)
+            if not df.empty:
+                return ensemble.id, key_info.key, key_info.filter_on
+    raise AssertionError("No populated response found in snake_oil storage")
+
+
+@pytest.mark.flaky(reruns=2)
+def test_that_cached_data_for_response_is_faster_than_uncached_fetch(
+    api_and_snake_oil_storage,
+):
+    api, _ = api_and_snake_oil_storage
+    ensemble_id, response_key, filter_on = _first_populated_response(api)
+    cache_key = (
+        ensemble_id,
+        response_key,
+        json.dumps(filter_on, sort_keys=True) if filter_on is not None else None,
+    )
+
+    # Evict the entry before each call so every measured invocation performs a
+    # real fetch and parquet parse instead of hitting the cache.
+    def uncached() -> None:
+        api._response_cache.pop(cache_key, None)
+        api.data_for_response(ensemble_id, response_key, filter_on)
+
+    uncached_seconds = timeit.timeit(uncached, number=50) / 50
+
+    # Warm the cache, then measure repeated cache hits.
+    api.data_for_response(ensemble_id, response_key, filter_on)
+    assert cache_key in api._response_cache
+
+    def cached() -> None:
+        api.data_for_response(ensemble_id, response_key, filter_on)
+
+    cached_seconds = timeit.timeit(cached, number=1000) / 1000
+
+    assert cached_seconds < uncached_seconds
