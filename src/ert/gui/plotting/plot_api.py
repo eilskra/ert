@@ -364,12 +364,12 @@ class PlotApi:
     @staticmethod
     @lru_cache(maxsize=128)
     def data_for_controls(
-        ensemble_id: str, parameter_keys: tuple[str, ...], ens_path: Path
+        ensemble_id: str, parameter_keys: tuple[str, ...], api: PlotApi
     ) -> pd.DataFrame:
         frames = []
 
         for parameter_key in parameter_keys:
-            df = PlotApi.data_for_parameter(ensemble_id, parameter_key, ens_path)
+            df = PlotApi.data_for_parameter(ensemble_id, parameter_key, api)
             if not df.empty and {"batch_id", "realization"}.issubset(df.columns):
                 value_cols = [
                     c for c in df.columns if c not in {"batch_id", "realization"}
@@ -388,31 +388,31 @@ class PlotApi:
     @staticmethod
     @lru_cache(maxsize=256)
     def data_for_parameter(
-        ensemble_id: str, parameter_key: str, ens_path: Path
+        ensemble_id: str, parameter_key: str, api: PlotApi
     ) -> pd.DataFrame:
-        with create_ertserver_client(ens_path) as client:
-            http_response = client.get(
-                f"/ensembles/{ensemble_id}/parameters/{PlotApi.escape(parameter_key)}",
-                headers={"accept": "application/x-parquet"},
-                timeout=TIMEOUT,
-            )
-            PlotApi._check_http_response(http_response)
+        client = api.get_client()
+        http_response = client.get(
+            f"/ensembles/{ensemble_id}/parameters/{PlotApi.escape(parameter_key)}",
+            headers={"accept": "application/x-parquet"},
+            timeout=TIMEOUT,
+        )
+        PlotApi._check_http_response(http_response)
 
-            stream = io.BytesIO(http_response.content)
-            df = pd.read_parquet(stream)
+        stream = io.BytesIO(http_response.content)
+        df = pd.read_parquet(stream)
 
-            if {"batch_id", "realization"}.issubset(df.columns):
-                return df
-
-            try:
-                df.columns = pd.to_datetime(df.columns, format="%Y-%m-%d %H:%M:%S")
-            except (ParserError, ValueError):
-                df.columns = [int(s) for s in df.columns]
-
-            for col in df.columns:
-                if is_numeric_dtype(df[col]):
-                    df[col] = df[col].astype(float)
+        if {"batch_id", "realization"}.issubset(df.columns):
             return df
+
+        try:
+            df.columns = pd.to_datetime(df.columns, format="%Y-%m-%d %H:%M:%S")
+        except (ParserError, ValueError):
+            df.columns = [int(s) for s in df.columns]
+
+        for col in df.columns:
+            if is_numeric_dtype(df[col]):
+                df[col] = df[col].astype(float)
+        return df
 
     def observation_locations(self) -> pd.DataFrame:
         http_response = self._client.get("/experiments", timeout=TIMEOUT)
@@ -579,3 +579,6 @@ class PlotApi:
             # Deserialize the numpy array
             return np.load(io.BytesIO(http_response.content))
         return np.array([])
+
+    def get_client(self) -> httpx.Client:
+        return self._client

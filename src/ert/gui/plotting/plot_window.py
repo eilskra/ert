@@ -492,7 +492,7 @@ class PlotWindow(QMainWindow):
                             ensemble_id=ensemble.id,
                             parameter_keys=tuple(selected_controls)
                             or tuple(self._everest_parameters),
-                            ens_path=self._ens_path,
+                            api=self._api,
                         )
                     elif key_def.parameter is not None and (
                         key_def.parameter.type
@@ -501,7 +501,7 @@ class PlotWindow(QMainWindow):
                         data = PlotApi.data_for_parameter(
                             ensemble_id=ensemble.id,
                             parameter_key=key_def.parameter.name,
-                            ens_path=self._ens_path,
+                            api=self._api,
                         )
                 except BaseException as e:
                     return ensemble, e
