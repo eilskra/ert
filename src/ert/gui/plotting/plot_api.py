@@ -63,19 +63,19 @@ class PlotApi:
     def __init__(self, ens_path: Path) -> None:
         self.ens_path: Path = ens_path
         self._all_ensembles: list[EnsembleObject] | None = None
+        self._client = create_ertserver_client(self.ens_path)
 
     @property
     def api_version(self) -> str:
-        with create_ertserver_client(self.ens_path) as client:
-            try:
-                http_response = client.get("/version", timeout=TIMEOUT)
-                self._check_http_response(http_response)
-                api_version = str(http_response.json())
-            except Exception as exc:
-                logger.exception(exc)
-                raise exc
-            else:
-                return api_version
+        try:
+            http_response = self._client.get("/version", timeout=TIMEOUT)
+            self._check_http_response(http_response)
+            api_version = str(http_response.json())
+        except Exception as exc:
+            logger.exception(exc)
+            raise exc
+        else:
+            return api_version
 
     @staticmethod
     def escape(s: str) -> str:
@@ -92,54 +92,48 @@ class PlotApi:
             return self._all_ensembles
 
         self._all_ensembles = []
-        with create_ertserver_client(self.ens_path) as client:
-            try:  # ruff: ignore[too-many-statements-in-try-clause]
-                http_response = client.get("/experiments", timeout=TIMEOUT)
-                self._check_http_response(http_response)
-                experiments = http_response.json()
-                for experiment in experiments:
-                    for ensemble_id in experiment["ensemble_ids"]:
-                        http_response = client.get(
-                            f"/ensembles/{ensemble_id}", timeout=TIMEOUT
+        try:  # ruff: ignore[too-many-statements-in-try-clause]
+            http_response = self._client.get("/experiments", timeout=TIMEOUT)
+            self._check_http_response(http_response)
+            experiments = http_response.json()
+            for experiment in experiments:
+                for ensemble_id in experiment["ensemble_ids"]:
+                    http_response = self._client.get(
+                        f"/ensembles/{ensemble_id}", timeout=TIMEOUT
+                    )
+                    self._check_http_response(http_response)
+                    response_json: dict[str, Any] = http_response.json()
+                    ensemble_name: str = response_json["userdata"]["name"]
+                    experiment_name: str = response_json["userdata"]["experiment_name"]
+                    ensemble_started_at = response_json["userdata"]["started_at"]
+                    ensemble_undefined = False
+                    if realization_storage_states := response_json.get(
+                        "realization_storage_states"
+                    ):
+                        ensemble_undefined = (
+                            RealizationStorageState.PARAMETERS_LOADED
+                            not in set(realization_storage_states)
                         )
-                        self._check_http_response(http_response)
-                        response_json: dict[str, Any] = http_response.json()
-                        ensemble_name: str = response_json["userdata"]["name"]
-                        experiment_name: str = response_json["userdata"][
-                            "experiment_name"
-                        ]
-                        ensemble_started_at = response_json["userdata"]["started_at"]
-                        ensemble_undefined = False
-                        if realization_storage_states := response_json.get(
-                            "realization_storage_states"
-                        ):
-                            ensemble_undefined = (
-                                RealizationStorageState.PARAMETERS_LOADED
-                                not in set(realization_storage_states)
-                            )
-                        self._all_ensembles.append(
-                            EnsembleObject(
-                                name=ensemble_name,
-                                id=ensemble_id,
-                                experiment_name=experiment_name,
-                                hidden=ensemble_name.startswith(".")
-                                or ensemble_undefined,
-                                started_at=ensemble_started_at,
-                                has_func_eval=bool(
-                                    response_json["userdata"].get(
-                                        "has_func_eval", False
-                                    )
-                                ),
-                                has_gradient=bool(
-                                    response_json["userdata"].get("has_gradient", False)
-                                ),
-                            )
+                    self._all_ensembles.append(
+                        EnsembleObject(
+                            name=ensemble_name,
+                            id=ensemble_id,
+                            experiment_name=experiment_name,
+                            hidden=ensemble_name.startswith(".") or ensemble_undefined,
+                            started_at=ensemble_started_at,
+                            has_func_eval=bool(
+                                response_json["userdata"].get("has_func_eval", False)
+                            ),
+                            has_gradient=bool(
+                                response_json["userdata"].get("has_gradient", False)
+                            ),
                         )
-            except IndexError as exc:
-                logger.exception(exc)
-                raise exc
-            else:
-                return self._all_ensembles
+                    )
+        except IndexError as exc:
+            logger.exception(exc)
+            raise exc
+        else:
+            return self._all_ensembles
 
     @staticmethod
     def _check_http_response(http_response: httpx._models.Response) -> None:
@@ -156,26 +150,25 @@ class PlotApi:
         all_keys: dict[str, PlotApiKeyDefinition] = {}
         all_params = {}
 
-        with create_ertserver_client(self.ens_path) as client:
-            http_response = client.get("/experiments", timeout=TIMEOUT)
-            self._check_http_response(http_response)
+        http_response = self._client.get("/experiments", timeout=TIMEOUT)
+        self._check_http_response(http_response)
 
-            for experiment in http_response.json():
-                for metadata in experiment["parameters"].values():
-                    param_cfg = parameter_config_adapter.validate_python(metadata)
-                    if group := metadata.get("group"):
-                        param_key = f"{group}:{metadata['name']}"
-                    else:
-                        param_key = metadata["name"]
-                    all_keys[param_key] = PlotApiKeyDefinition(
-                        key=param_key,
-                        index_type=None,
-                        observations=False,
-                        dimensionality=metadata["dimensionality"],
-                        metadata={"data_origin": metadata["type"]},
-                        parameter=param_cfg,
-                    )
-                    all_params[param_key] = all_keys[param_key]
+        for experiment in http_response.json():
+            for metadata in experiment["parameters"].values():
+                param_cfg = parameter_config_adapter.validate_python(metadata)
+                if group := metadata.get("group"):
+                    param_key = f"{group}:{metadata['name']}"
+                else:
+                    param_key = metadata["name"]
+                all_keys[param_key] = PlotApiKeyDefinition(
+                    key=param_key,
+                    index_type=None,
+                    observations=False,
+                    dimensionality=metadata["dimensionality"],
+                    metadata={"data_origin": metadata["type"]},
+                    parameter=param_cfg,
+                )
+                all_params[param_key] = all_keys[param_key]
 
         return list(all_keys.values())
 
@@ -183,72 +176,71 @@ class PlotApi:
     def responses_api_key_defs(self) -> list[PlotApiKeyDefinition]:
         key_defs: dict[str, PlotApiKeyDefinition] = {}
 
-        with create_ertserver_client(self.ens_path) as client:
-            http_response = client.get("/experiments", timeout=TIMEOUT)
-            self._check_http_response(http_response)
+        http_response = self._client.get("/experiments", timeout=TIMEOUT)
+        self._check_http_response(http_response)
 
-            def update_keydef(plot_key_def: PlotApiKeyDefinition) -> None:
-                # Only replace existing key definition if the new has observations
-                if plot_key_def.key not in key_defs or plot_key_def.observations:
-                    key_defs[plot_key_def.key] = plot_key_def
+        def update_keydef(plot_key_def: PlotApiKeyDefinition) -> None:
+            # Only replace existing key definition if the new has observations
+            if plot_key_def.key not in key_defs or plot_key_def.observations:
+                key_defs[plot_key_def.key] = plot_key_def
 
-            for experiment in http_response.json():
-                for response_type, metadata in experiment["responses"].items():
-                    response_config: KnownResponseTypes = (
-                        response_config_adapter.validate_python(metadata)
+        for experiment in http_response.json():
+            for response_type, metadata in experiment["responses"].items():
+                response_config: KnownResponseTypes = (
+                    response_config_adapter.validate_python(metadata)
+                )
+                keys = response_config.response_keys()
+                for key in keys:
+                    has_obs = (
+                        response_type in experiment["observations"]
+                        and key in experiment["observations"][response_type]
                     )
-                    keys = response_config.response_keys()
-                    for key in keys:
-                        has_obs = (
-                            response_type in experiment["observations"]
-                            and key in experiment["observations"][response_type]
-                        )
-                        if response_config.filter_on is not None:
-                            # Only assume one filter_on, this code is to be
-                            # considered a bit "temp".
-                            # In general, we could create a dropdown per
-                            # filter_on on the frontend side
+                    if response_config.filter_on is not None:
+                        # Only assume one filter_on, this code is to be
+                        # considered a bit "temp".
+                        # In general, we could create a dropdown per
+                        # filter_on on the frontend side
 
-                            filter_for_key = response_config.filter_on.get(key, {})
-                            for filter_key, values in filter_for_key.items():
-                                for v in values:
-                                    filter_on = {filter_key: v}
-                                    subkey = f"{key}@{v}"
-                                    update_keydef(
-                                        PlotApiKeyDefinition(
-                                            key=subkey,
-                                            index_type="VALUE",
-                                            observations=has_obs,
-                                            dimensionality=2,
-                                            metadata={
-                                                "data_origin": response_type,
-                                            },
-                                            filter_on=filter_on,
-                                            response=response_config,
-                                        )
+                        filter_for_key = response_config.filter_on.get(key, {})
+                        for filter_key, values in filter_for_key.items():
+                            for v in values:
+                                filter_on = {filter_key: v}
+                                subkey = f"{key}@{v}"
+                                update_keydef(
+                                    PlotApiKeyDefinition(
+                                        key=subkey,
+                                        index_type="VALUE",
+                                        observations=has_obs,
+                                        dimensionality=2,
+                                        metadata={
+                                            "data_origin": response_type,
+                                        },
+                                        filter_on=filter_on,
+                                        response=response_config,
                                     )
-                        else:
-                            update_keydef(
-                                PlotApiKeyDefinition(
-                                    key=key,
-                                    index_type="VALUE",
-                                    observations=has_obs,
-                                    dimensionality=2,
-                                    metadata={"data_origin": response_type},
-                                    response=response_config,
                                 )
+                    else:
+                        update_keydef(
+                            PlotApiKeyDefinition(
+                                key=key,
+                                index_type="VALUE",
+                                observations=has_obs,
+                                dimensionality=2,
+                                metadata={"data_origin": response_type},
+                                response=response_config,
                             )
-
-                if "everest_objectives" in experiment["responses"]:
-                    update_keydef(
-                        PlotApiKeyDefinition(
-                            key="total objective value",
-                            index_type="VALUE",
-                            observations=False,
-                            dimensionality=2,
-                            metadata={"data_origin": "everest_batch_objectives"},
                         )
+
+            if "everest_objectives" in experiment["responses"]:
+                update_keydef(
+                    PlotApiKeyDefinition(
+                        key="total objective value",
+                        index_type="VALUE",
+                        observations=False,
+                        dimensionality=2,
+                        metadata={"data_origin": "everest_batch_objectives"},
                     )
+                )
 
         return list(key_defs.values())
 
@@ -268,81 +260,80 @@ class PlotApi:
 
         if "@" in response_key:
             response_key = response_key.split("@", maxsplit=1)[0]
-        with create_ertserver_client(self.ens_path) as client:
-            http_response = client.get(
-                f"/ensembles/{ensemble_id}/responses/{PlotApi.escape(response_key)}",
-                headers={"accept": "application/x-parquet"},
-                params={"filter_on": json.dumps(filter_on)}
-                if filter_on is not None
-                else None,
-                timeout=TIMEOUT,
+        http_response = self._client.get(
+            f"/ensembles/{ensemble_id}/responses/{PlotApi.escape(response_key)}",
+            headers={"accept": "application/x-parquet"},
+            params={"filter_on": json.dumps(filter_on)}
+            if filter_on is not None
+            else None,
+            timeout=TIMEOUT,
+        )
+        self._check_http_response(http_response)
+
+        stream = io.BytesIO(http_response.content)
+        df = pd.read_parquet(stream)
+
+        if df.empty:
+            return df
+
+        if is_everest:
+            assert {"batch_id", "realization"}.issubset(df.columns)
+
+            float_columns = [
+                col for col in df.columns if col not in {"batch_id", "realization"}
+            ]
+
+            return df.astype(
+                dict.fromkeys(float_columns, float)
+                | {
+                    "batch_id": int,
+                    "realization": int,
+                }
             )
-            self._check_http_response(http_response)
 
-            stream = io.BytesIO(http_response.content)
-            df = pd.read_parquet(stream)
+        if (
+            key_def is not None
+            and key_def.metadata.get("data_origin") == "everest_batch_objectives"
+        ):
+            assert {"batch_id", "accepted"}.issubset(df.columns)
 
-            if df.empty:
-                return df
+            float_columns_names = (
+                {"batch_id", "accepted", "constraint_violation_type"}
+                if "constraint_violation_type" in df.columns
+                else {"batch_id", "accepted"}
+            )
+            float_columns = [
+                col for col in df.columns if col not in float_columns_names
+            ]
 
-            if is_everest:
-                assert {"batch_id", "realization"}.issubset(df.columns)
+            return df.astype(
+                dict.fromkeys(float_columns, float)
+                | {
+                    "batch_id": int,
+                    "accepted": bool,
+                    "improvement_value": float,
+                    "constraint_violation_type": str,
+                }
+                if "constraint_violation_type" in df.columns
+                else {
+                    "batch_id": int,
+                    "accepted": bool,
+                    "improvement_value": float,
+                }
+            )
 
-                float_columns = [
-                    col for col in df.columns if col not in {"batch_id", "realization"}
-                ]
-
-                return df.astype(
-                    dict.fromkeys(float_columns, float)
-                    | {
-                        "batch_id": int,
-                        "realization": int,
-                    }
-                )
-
-            if (
-                key_def is not None
-                and key_def.metadata.get("data_origin") == "everest_batch_objectives"
-            ):
-                assert {"batch_id", "accepted"}.issubset(df.columns)
-
-                float_columns_names = (
-                    {"batch_id", "accepted", "constraint_violation_type"}
-                    if "constraint_violation_type" in df.columns
-                    else {"batch_id", "accepted"}
-                )
-                float_columns = [
-                    col for col in df.columns if col not in float_columns_names
-                ]
-
-                return df.astype(
-                    dict.fromkeys(float_columns, float)
-                    | {
-                        "batch_id": int,
-                        "accepted": bool,
-                        "improvement_value": float,
-                        "constraint_violation_type": str,
-                    }
-                    if "constraint_violation_type" in df.columns
-                    else {
-                        "batch_id": int,
-                        "accepted": bool,
-                        "improvement_value": float,
-                    }
-                )
-
+        try:
+            df.columns = pd.to_datetime(df.columns, format="%Y-%m-%d %H:%M:%S")
+        except (ParserError, ValueError):
             try:
-                df.columns = pd.to_datetime(df.columns, format="%Y-%m-%d %H:%M:%S")
-            except (ParserError, ValueError):
-                try:
-                    df.columns = [int(s) for s in df.columns]
-                except ValueError:
-                    df.columns = [float(s) for s in df.columns]
-
-            try:
-                return df.astype(float)
+                df.columns = [int(s) for s in df.columns]
             except ValueError:
-                return df
+                df.columns = [float(s) for s in df.columns]
+
+        try:
+            return df.astype(float)
+        except ValueError:
+            return df
 
     @staticmethod
     @process_arg(key="key", process=lambda s: s.split("@", maxsplit=1)[0])
@@ -424,48 +415,47 @@ class PlotApi:
             return df
 
     def observation_locations(self) -> pd.DataFrame:
-        with create_ertserver_client(self.ens_path) as client:
-            http_response = client.get("/experiments", timeout=TIMEOUT)
+        http_response = self._client.get("/experiments", timeout=TIMEOUT)
+        self._check_http_response(http_response)
+        experiments = http_response.json()
+
+        all_observations_list = []
+        for experiment in experiments:
+            experiment_id = str(experiment["id"])
+            http_response = self._client.get(
+                f"/experiments/{experiment_id}/observations",
+                timeout=TIMEOUT,
+            )
             self._check_http_response(http_response)
-            experiments = http_response.json()
+            observations = http_response.json()
 
-            all_observations_list = []
-            for experiment in experiments:
-                experiment_id = str(experiment["id"])
-                http_response = client.get(
-                    f"/experiments/{experiment_id}/observations",
-                    timeout=TIMEOUT,
-                )
-                self._check_http_response(http_response)
-                observations = http_response.json()
+            try:
+                if not observations:
+                    continue
+                new_obs = pd.concat(
+                    (
+                        pd.DataFrame(
+                            {
+                                "east": obs["east"],
+                                "north": obs["north"],
+                                "radius": obs["radius"],
+                            }
+                        )
+                        for obs in observations
+                    ),
+                    ignore_index=True,
+                ).dropna()
+                if not new_obs.empty:
+                    all_observations_list.append(new_obs)
+            except KeyError as e:
+                raise httpx.RequestError(
+                    f"Observation payload missing coordinate key {e} for"
+                    f" experiment {experiment_id}"
+                ) from e
 
-                try:
-                    if not observations:
-                        continue
-                    new_obs = pd.concat(
-                        (
-                            pd.DataFrame(
-                                {
-                                    "east": obs["east"],
-                                    "north": obs["north"],
-                                    "radius": obs["radius"],
-                                }
-                            )
-                            for obs in observations
-                        ),
-                        ignore_index=True,
-                    ).dropna()
-                    if not new_obs.empty:
-                        all_observations_list.append(new_obs)
-                except KeyError as e:
-                    raise httpx.RequestError(
-                        f"Observation payload missing coordinate key {e} for"
-                        f" experiment {experiment_id}"
-                    ) from e
-
-            if not all_observations_list:
-                return pd.DataFrame()
-            return pd.concat(all_observations_list, ignore_index=True)
+        if not all_observations_list:
+            return pd.DataFrame()
+        return pd.concat(all_observations_list, ignore_index=True)
 
     def observations_for_key(self, ensemble_ids: list[str], key: str) -> pd.DataFrame:
         """Returns a pandas DataFrame with the datapoints for a given observation key
@@ -490,51 +480,50 @@ class PlotApi:
             if "@" in actual_response_key:
                 actual_response_key = key.split("@", maxsplit=1)[0]
             filter_on = key_def.filter_on
-            with create_ertserver_client(self.ens_path) as client:
-                http_response = client.get(
-                    f"/ensembles/{ensemble.id}/responses/{PlotApi.escape(actual_response_key)}/observations",
-                    timeout=TIMEOUT,
-                    params={"filter_on": json.dumps(filter_on)}
-                    if filter_on is not None
-                    else None,
-                )
-                self._check_http_response(http_response)
+            http_response = self._client.get(
+                f"/ensembles/{ensemble.id}/responses/{PlotApi.escape(actual_response_key)}/observations",
+                timeout=TIMEOUT,
+                params={"filter_on": json.dumps(filter_on)}
+                if filter_on is not None
+                else None,
+            )
+            self._check_http_response(http_response)
 
-                observations = http_response.json()
+            observations = http_response.json()
+            try:
+                observations_dfs = []
+                if not observations:
+                    continue
+
+                observations[0]  # Just preserving the old logic/behavior
+                # but this should really be revised
+            except (KeyError, IndexError) as e:
+                raise httpx.RequestError(
+                    f"Observation schema might have changed key={key}, "
+                    f"ensemble_name={ensemble.name}, e={e}"
+                ) from e
+
+            key_index: list[int | float | pd.Timestamp]
+            for obs in observations:
                 try:
-                    observations_dfs = []
-                    if not observations:
-                        continue
-
-                    observations[0]  # Just preserving the old logic/behavior
-                    # but this should really be revised
-                except (KeyError, IndexError) as e:
-                    raise httpx.RequestError(
-                        f"Observation schema might have changed key={key}, "
-                        f"ensemble_name={ensemble.name}, e={e}"
-                    ) from e
-
-                key_index: list[int | float | pd.Timestamp]
-                for obs in observations:
+                    int(obs["x_axis"][0])
+                    key_index = [int(v) for v in obs["x_axis"]]
+                except ValueError:
                     try:
-                        int(obs["x_axis"][0])
-                        key_index = [int(v) for v in obs["x_axis"]]
+                        float(obs["x_axis"][0])
+                        key_index = [float(v) for v in obs["x_axis"]]
                     except ValueError:
-                        try:
-                            float(obs["x_axis"][0])
-                            key_index = [float(v) for v in obs["x_axis"]]
-                        except ValueError:
-                            key_index = [pd.Timestamp(v) for v in obs["x_axis"]]
+                        key_index = [pd.Timestamp(v) for v in obs["x_axis"]]
 
-                    observations_dfs.append(
-                        pd.DataFrame(
-                            {
-                                "STD": obs["errors"],
-                                "OBS": obs["values"],
-                                "key_index": key_index,
-                            }
-                        )
+                observations_dfs.append(
+                    pd.DataFrame(
+                        {
+                            "STD": obs["errors"],
+                            "OBS": obs["values"],
+                            "key_index": key_index,
+                        }
                     )
+                )
 
                 all_observations = pd.concat([all_observations, *observations_dfs])
 
@@ -580,14 +569,13 @@ class PlotApi:
         if not ensemble:
             return np.array([])
 
-        with create_ertserver_client(self.ens_path) as client:
-            http_response = client.get(
-                f"/ensembles/{ensemble.id}/parameters/{PlotApi.escape(key)}/std_dev",
-                params={"z": z},
-                timeout=TIMEOUT,
-            )
+        http_response = self._client.get(
+            f"/ensembles/{ensemble.id}/parameters/{PlotApi.escape(key)}/std_dev",
+            params={"z": z},
+            timeout=TIMEOUT,
+        )
 
-            if http_response.status_code == 200:
-                # Deserialize the numpy array
-                return np.load(io.BytesIO(http_response.content))
-            return np.array([])
+        if http_response.status_code == 200:
+            # Deserialize the numpy array
+            return np.load(io.BytesIO(http_response.content))
+        return np.array([])
