@@ -1,5 +1,6 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QLayout,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -9,7 +10,7 @@ from PyQt6.QtWidgets import (
 
 class CollapsibleSection(QWidget):
     def __init__(
-        self, title: str, content_layout: QVBoxLayout, *, expanded: bool = False
+        self, title: str, content_layout: QLayout, *, expanded: bool = False
     ) -> None:
         super().__init__()
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
