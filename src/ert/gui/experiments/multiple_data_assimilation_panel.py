@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QStyle,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -32,6 +33,7 @@ from ert.gui.ertwidgets import (
 from ert.gui.ertwidgets.models.parameter_configuration_state_model import (
     ParameterConfigurationStateModel,
 )
+from ert.gui.plotting.widgets.collapsible_section import CollapsibleSection
 from ert.mode_definitions import ES_MDA_MODE
 from ert.run_models import MultipleDataAssimilation
 from ert.storage.local_experiment import ExperimentType
@@ -118,6 +120,12 @@ def create_select_prior_ensemble_box(selector: EnsembleSelector) -> QCheckBox:
     return checkbox
 
 
+def _create_section_form_layout() -> QFormLayout:
+    layout = QFormLayout()
+    layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    return layout
+
+
 class MultipleDataAssimilationPanel(ExperimentConfigPanel):
     def __init__(
         self,
@@ -134,16 +142,19 @@ class MultipleDataAssimilationPanel(ExperimentConfigPanel):
         self._configured_weights = analysis_config.es_settings.weights
         self._weights_source = self._configured_weights
 
-        layout = QFormLayout()
-        layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setObjectName("ES_MDA_panel")
+
+        experiment_layout = _create_section_form_layout()
+        ensemble_layout = _create_section_form_layout()
+        parameter_layout = _create_section_form_layout()
+        weights_layout = _create_section_form_layout()
 
         self._experiment_name_field = create_experiment_name_field(
             self.notifier.storage, ES_MDA_MODE
         )
-        layout.addRow("Experiment name:", self._experiment_name_field)
+        experiment_layout.addRow("Experiment name:", self._experiment_name_field)
 
-        layout.addRow("Runpath:", CopyableLabel(text=runpath))
+        experiment_layout.addRow("Runpath:", CopyableLabel(text=runpath))
 
         self._weights_before_single_update = self._configured_weights
         single_update_tooltip = (
@@ -155,12 +166,13 @@ class MultipleDataAssimilationPanel(ExperimentConfigPanel):
         self._single_update_box.setToolTip(single_update_tooltip)
         single_update_label = QLabel("Single update (Ensemble Smoother):")
         single_update_label.setToolTip(single_update_tooltip)
-        layout.addRow(single_update_label, self._single_update_box)
+        single_update_layout = _create_section_form_layout()
+        single_update_layout.addRow(single_update_label, self._single_update_box)
 
         number_of_realizations_container, number_of_realizations_label = (
             create_number_of_realizations_container(len(active_realizations))
         )
-        layout.addRow(
+        experiment_layout.addRow(
             QLabel("Number of realizations:"),
             number_of_realizations_container,
         )
@@ -169,14 +181,14 @@ class MultipleDataAssimilationPanel(ExperimentConfigPanel):
             self._target_ensemble_format_model,
             self._target_ensemble_format_field,
         ) = create_target_ensemble_format_field(analysis_config, self.notifier)
-        layout.addRow(
+        ensemble_layout.addRow(
             "Target ensemble format:",
             self._target_ensemble_format_field,
         )
 
         self.weights = self._configured_weights
         self.weights_valid = True
-        self._createInputForWeights(layout)
+        self._createInputForWeights(weights_layout)
 
         self._param_state = ParameterConfigurationStateModel(
             merge_design_matrix_parameters(
@@ -193,7 +205,7 @@ class MultipleDataAssimilationPanel(ExperimentConfigPanel):
             ),  # only use active realizations for setting threshold
             can_edit_update_strategies=lambda: not self._param_state.has_prior,
         )
-        layout.addRow("Update settings:", self._analysis_module_edit)
+        parameter_layout.addRow("Update settings:", self._analysis_module_edit)
 
         self._update_strategy_label = QLabel("Parameter Localizations")
         self._update_strategy_label.setObjectName("update_strategy_label")
@@ -203,7 +215,9 @@ class MultipleDataAssimilationPanel(ExperimentConfigPanel):
         self._update_strategy_label.setToolTip(
             self._update_strategy_summary_widget.toolTip()
         )
-        layout.addRow(self._update_strategy_label, self._update_strategy_summary_widget)
+        parameter_layout.addRow(
+            self._update_strategy_label, self._update_strategy_summary_widget
+        )
 
         (
             self._active_realizations_field,
@@ -211,7 +225,9 @@ class MultipleDataAssimilationPanel(ExperimentConfigPanel):
         ) = create_active_realizations_field(active_realizations)
         self._active_realizations_field.setObjectName("active_realizations_box")
         self._initial_active_realizations = active_realizations
-        layout.addRow("Active realizations:", self._active_realizations_field)
+        experiment_layout.addRow(
+            "Active realizations:", self._active_realizations_field
+        )
 
         self._ensemble_selector = create_prior_ensemble_selector(notifier)
         self._previous_ensemble_realizations_validator = EnsembleRealizationsArgument(
@@ -223,18 +239,31 @@ class MultipleDataAssimilationPanel(ExperimentConfigPanel):
         self._select_prior_ensemble_box = create_select_prior_ensemble_box(
             self._ensemble_selector
         )
-        layout.addRow("Select prior ensemble:", self._select_prior_ensemble_box)
-        layout.addRow("Run from prior ensemble:", self._ensemble_selector)
+        ensemble_layout.addRow(
+            "Select prior ensemble:", self._select_prior_ensemble_box
+        )
+        ensemble_layout.addRow("Run from prior ensemble:", self._ensemble_selector)
 
         self._connect_signals()
         add_parameter_configuration_rows(
             self,
-            layout,
+            parameter_layout,
             design_matrix=analysis_config.design_matrix,
             get_parameter_configuration=lambda: self._param_state.parameters,
             number_of_realizations_label=number_of_realizations_label,
             config_num_realization=config_num_realization,
         )
+
+        layout = QVBoxLayout()
+        layout.addLayout(single_update_layout)
+        for title, section_layout in (
+            ("Experiment settings", experiment_layout),
+            ("Ensemble settings", ensemble_layout),
+            ("Parameter settings", parameter_layout),
+            ("Weights", weights_layout),
+        ):
+            layout.addWidget(CollapsibleSection(title, section_layout))
+        layout.addStretch()
         self.setLayout(layout)
 
     def _connect_signals(self) -> None:
